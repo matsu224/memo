@@ -776,6 +776,50 @@ Properties
 * Material Inspector から変更可能な値を定義する。
 * Color、Float、Texture などを公開できる。
 
+#### Property の構文と型
+
+基本形は `[属性] 内部名("表示名", 型) = 既定値`。属性は省略できる。
+
+```shaderlab
+Properties
+{
+    [MainTexture] _BaseMap("Base Map", 2D) = "white" {}
+    [MainColor] _BaseColor("Base Color", Color) = (1, 1, 1, 1)
+    _Strength("Strength", Range(0, 1)) = 0.5
+    _Speed("Speed", Float) = 0.1
+    _Direction("Direction", Vector) = (1, 0, 0, 0)
+}
+```
+
+* `_BaseMap` などはコードから参照する内部名。HLSL 側も同じ名前で宣言する。先頭の `_` はよく使われる命名慣習。
+* `"Base Map"` などは Inspector の表示名。
+
+| 型 | 用途・既定値の例 |
+|---|---|
+| `Float` / `Range(min, max)` | 数値 / Inspector でスライダー表示する数値。例：`0.5` |
+| `Integer` | 整数。例：`1` |
+| `Color` / `Vector` | 色 / 4成分の数値。例：`(1, 1, 1, 1)` |
+| `2D` | 2次元画像。例：`"white" {}`。未指定時は白。`"black"`、`"gray"`、`"bump"` なども使える |
+| `Cube` / `3D` / `2DArray` | キューブマップ / 3次元テクスチャ / 2次元テクスチャ配列。例：`"" {}` |
+
+* テクスチャ型の末尾の `{}` は ShaderLab の構文。この例では中身を空にする。
+
+#### Property の属性
+
+属性は Unity に用途や Inspector での扱いを伝える。`[Main〜]` を任意の型に作れるわけではない。
+
+| 属性 | 用途 |
+|---|---|
+| `[MainTexture]` | メインテクスチャを指定。C# の `material.mainTexture` から参照できる |
+| `[MainColor]` | メインカラーを指定。C# の `material.color` から参照できる |
+| `[HDR]` | HDR の色・テクスチャ用。Color では HDR カラーピッカーを表示 |
+| `[Normal]` | 法線マップを受け取るテクスチャ用 |
+| `[NoScaleOffset]` | テクスチャの Tiling / Offset 欄を非表示にする |
+| `[HideInInspector]` | Property を Inspector で非表示にする |
+
+* 複数指定も可能：`[MainColor] [HDR] _BaseColor("Base Color", Color) = (1, 1, 1, 1)`。
+* 属性や Properties の宣言だけでは描画に反映されない。HLSL で値を使う必要がある（第14章）。
+
 ### SubShader
 
 * 実際の描画処理をまとめる領域。
@@ -963,6 +1007,28 @@ return half4(1.0, 0.0, 0.0, 0.5);
 * URP の Shader で基本となる HLSL ライブラリ。
 * 座標変換などで使用する関数・マクロが含まれている。
 
+### 時間の組み込み変数
+
+Unity が自動で更新する値。URP では `Core.hlsl` を読み込んで使い、Properties / CBUFFER に自分で再宣言しない。
+
+| 変数（`float4`） | 成分 `(x, y, z, w)` | 主な使い方 |
+|---|---|---|
+| `_Time` | `(t / 20, t, t * 2, t * 3)` | `_Time.y` で経過秒数を取得 |
+| `_SinTime` | `(sin(t / 8), sin(t / 4), sin(t / 2), sin(t))` | `_SinTime.w` で −1～1 の周期変化 |
+| `_CosTime` | `(cos(t / 8), cos(t / 4), cos(t / 2), cos(t))` | `_CosTime.w` で位相の異なる周期変化 |
+| `unity_DeltaTime` | `(dt, 1 / dt, smoothDt, 1 / smoothDt)` | `.x` でフレーム間の経過秒数を取得 |
+
+* `t` は時間スケールの影響を受ける経過時間。URP では `Time.time` に対応。`dt` はフレーム間隔、`smoothDt` は平滑化した間隔。
+* スケールの影響を受けない時間が必要なら、C# から別の変数として渡す。
+
+```hlsl
+// Fragment Shader 内の例
+float2 uv = IN.uv + float2(_Time.y * 0.1, 0.0); // 毎秒Uを0.1ずらす
+float pulse = _SinTime.w * 0.5 + 0.5;          // −1～1を0～1へ変換
+```
+
+* Shader のローカル変数はフレームをまたいで値を蓄積しない。連続した移動には上のように経過時間から位置を計算する。
+
 ### URP / SRP Core の `real` 型
 
 * SRP Core の Shader Library では `real` / `real2` / `real3` / `real4` という Alias が使用される。
@@ -1072,10 +1138,9 @@ TEXTURE2D(_BaseMap);
 SAMPLER(sampler_BaseMap);
 ```
 
-* `TEXTURE2D`
-  * Texture を宣言する URP / SRP のマクロ。
-* `SAMPLER`
-  * Sampler を宣言するマクロ。
+* `TEXTURE2D(_BaseMap)`：画像を参照するための宣言。Properties のテクスチャ名と合わせる。
+* `SAMPLER(sampler_BaseMap)`：読み取り設定（Filter / Wrap など）の宣言。`sampler` ＋ テクスチャ名という命名で、そのテクスチャの設定を使う。
+* どちらも URP / SRP のマクロで、HLSLPROGRAM 内の関数・CBUFFER の外に置く。この段階ではまだ色を取得しない。
 
 ### Texture Sampling
 
@@ -1086,6 +1151,38 @@ half4 color =
 
 * Fragment Shader 内で、UV 位置に対応する Texture の値を取得する。
 * 頂点段階などでミップレベルを明示して読む場合は `SAMPLE_TEXTURE2D_LOD` を使う。
+
+| 引数・戻り値 | 意味 |
+|---|---|
+| 第1引数：`_BaseMap` | どの画像を読むか |
+| 第2引数：`sampler_BaseMap` | どの読み取り設定を使うか |
+| 第3引数：`IN.uv` | どこを読むか。`float2` の UV 座標 |
+| 戻り値：`half4 color` | 読み取った4成分。カラーテクスチャなら RGBA |
+
+* `IN.uv` は入力構造体のメンバー。計算したローカル変数 `uv` を渡してもよい。
+* Properties で画像を設定 → Texture / Sampler を宣言 → UV で読み取り → 色を出力、という流れ。
+
+```hlsl
+// 第12章の Properties を使う場合の HLSL 側の例（Core.hlsl 読み込み後）
+TEXTURE2D(_BaseMap);
+SAMPLER(sampler_BaseMap);
+CBUFFER_START(UnityPerMaterial)
+    half4 _BaseColor;
+    float _Strength;
+    float _Speed;
+    float4 _Direction;
+CBUFFER_END
+
+// Varyings に float2 uv がある想定。頂点関数は省略。
+half4 frag(Varyings IN) : SV_Target
+{
+    float2 uv = IN.uv + _Direction.xy * (_Time.y * _Speed);
+    half4 tex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
+    return lerp(half4(1, 1, 1, 1), tex, _Strength) * _BaseColor;
+}
+```
+
+* `_Strength = 0` なら単色、`1` ならテクスチャ × 色。繰り返しスクロールには Texture の Wrap Mode を `Repeat` にする。
 
 ### Texture の Tiling / Offset
 
