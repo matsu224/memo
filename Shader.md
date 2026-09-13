@@ -205,7 +205,9 @@ Fragment Shader
   * View Space の位置へ Projection Matrix を適用した後の4次元座標 `(x, y, z, w)`。
   * Rasterizer へ渡す Vertex Shader の位置出力は、この段階の値。
 * Perspective Projection では「遠いものほど小さく見える」ために、最終的に `x / w`、`y / w` のような除算が必要になる。
-* Matrix の乗算だけでは Perspective Divide そのものを表現できないため、Projection Matrix は後で割るための情報を `w` に保持する。
+* 各 Matrix は1回の描画中では基本的に定数で、同じ Projection Matrix が複数の頂点に適用される。
+* 一方、Clip Space の `w` は頂点ごとの奥行きに応じて異なるため、`1 / w` を固定係数として Projection Matrix に含めることはできない。
+* そのため Projection Matrix は後で割るための値を `w` に作り、Matrix 変換後に頂点ごとの `w` で割る Perspective Divide を別処理として行う。
 
 ```text
 Clip Space : (x, y, z, w)
