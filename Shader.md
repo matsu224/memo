@@ -829,6 +829,7 @@ Properties
 
 * 1回分の描画処理を定義する。
 * Vertex Shader / Fragment Shader や、描画状態の設定などを記述する。
+* 複数の `Pass` を記述しても、上から順に無条件ですべて実行されるわけではない。Render Pipeline が描画の各段階で、用途に合う `Pass` を選んで使用する。
 
 ### HLSLPROGRAM / ENDHLSL
 
@@ -1049,6 +1050,22 @@ Tags
   * どの Render Pipeline 用の SubShader なのかを示す。
 * `RenderType`
   * Opaque / Transparent など描画上の分類に利用される。
+
+#### Pass の `LightMode` Tag
+
+```shaderlab
+Pass
+{
+    Tags { "LightMode" = "UniversalForward" }
+
+    // HLSLPROGRAM ... ENDHLSL
+}
+```
+
+* `LightMode` は `Pass` 内に記述し、その `Pass` の用途を URP に伝える分類。
+* URP は描画の段階に応じて、`LightMode` が対応する `Pass` を選択する。したがって、Shader 内の `Pass` が記述順に無条件ですべて実行されるわけではない。
+* 例：`UniversalForward` は Forward Rendering でオブジェクトを描画するための `Pass`、`ShadowCaster` は Shadow Map へ深度を書き込むための `Pass` を示す。
+* `LightMode` を省略した `Pass` は、URP では `SRPDefaultUnlit` として扱われる。
 
 ### Attributes
 
