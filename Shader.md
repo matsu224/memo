@@ -168,6 +168,33 @@ Fragment Shader
   * `A` : Alpha
 * 通常の色や Alpha は `0.0 ～ 1.0` が基本だが、型がこの範囲に制限するわけではない。HDR の RGB では `1.0` を超える値も使う。
 
+#### 色の値・Render Target・HDR
+
+* Shader 内の `float` / Vector は、色として使用しても自動的に `0.0 ～ 1.0` へ制限されない。
+* 出力を保持できる範囲は書き込み先の形式で決まる。一般的な正規化整数の LDR Render Target では範囲外の値が保存時に Clamp されるが、浮動小数点の HDR Render Target では `1.0` を超える値も保持できる。
+* Display へ出す際は、最終的に表示可能な範囲へ変換する必要がある。単純な Clamp では `1.0` と `1.5` の差が失われるが、Tone Mapping は HDR の輝度差を表示範囲へ圧縮し、Bloom は変換前の明るい値を利用できる。
+
+次の例で `vy` が `0.0 ～ 1.0`、`strength = 0.5` の場合、Green と Blue は最初から `1.0` 以上になる。
+
+```glsl
+vec3 color = vec3(0.0, 1.0, 1.0);
+color += color * vy * strength;
+
+// vy = 0.0 → (0.0, 1.00, 1.00)
+// vy = 0.5 → (0.0, 1.25, 1.25)
+// vy = 1.0 → (0.0, 1.50, 1.50)
+```
+
+LDR 出力で単純に Clamp されると、これらはすべて同じ Cyan に見える。`0.0 ～ 1.0` 内で変化を確認するなら、最初から明るさに余裕を持たせる。
+
+```glsl
+vec3 baseColor = vec3(0.0, 1.0, 1.0);
+vec3 color = baseColor * (0.3 + vy * 0.7);
+```
+
+* ShaderToy の通常の最終 Image は WebGL の画面用 Buffer を経て表示されるため、`1.0` を超える値をそのまま画面の明るさとして区別できない。浮動小数点の中間 Buffer なら範囲外を保持できる場合もあるが、最終表示には Clamp や Tone Mapping などの範囲変換が必要。
+* Unity で差が見えるかは、HDR 対応の Render Target、Camera / Render Pipeline 設定、Tone Mapping、Bloom などを含む描画経路による。HDR Color を指定しただけで、すべての経路が自動的に `1.0` 超を保持するとは限らない。
+
 ### Texture
 
 * 色・Normal・深度・マスクなどを格納するデータ。
@@ -280,16 +307,68 @@ Screen / Window Space
 
 | 概念 | HLSL | GLSL |
 |---|---|---|
+| 絶対値 | `abs(x)` | `abs(x)` |
+| 小さい方 / 大きい方 | `min(a, b)` / `max(a, b)` | `min(a, b)` / `max(a, b)` |
+| 符号 | `sign(x)` | `sign(x)` |
+| 切り上げ / 最も近い整数へ丸め | `ceil(x)` / `round(x)` | `ceil(x)` / `round(x)` |
 | 内積 | `dot(a, b)` | `dot(a, b)` |
+| ベクトルの長さ | `length(v)` | `length(v)` |
+| 2点間の距離 | `distance(a, b)` | `distance(a, b)` |
+| 3次元ベクトルの外積 | `cross(a, b)` | `cross(a, b)` |
 | 正規化 | `normalize(v)` | `normalize(v)` |
+| 反射方向 | `reflect(i, n)` | `reflect(i, n)` |
+| 屈折方向 | `refract(i, n, eta)` | `refract(i, n, eta)` |
 | 線形補間 | `lerp(a, b, t)` | `mix(a, b, t)` |
 | 範囲制限 | `clamp(x, low, high)` | `clamp(x, low, high)` |
 | 0〜1 に制限 | `saturate(x)` | `clamp(x, 0.0, 1.0)` |
 | 切り下げ | `floor(x)` | `floor(x)` |
 | 小数部分 | `frac(x)` | `fract(x)` |
+| 浮動小数点の剰余 | `fmod(x, y)` | `mod(x, y)` |
+| べき乗 | `pow(x, y)` | `pow(x, y)` |
+| 平方根 | `sqrt(x)` | `sqrt(x)` |
+| 平方根の逆数 | `rsqrt(x)` | `inversesqrt(x)` |
 | 閾値による切り替え | `step(edge, x)` | `step(edge, x)` |
 | 滑らかな閾値 | `smoothstep(low, high, x)` | `smoothstep(low, high, x)` |
 | 三角関数 | `sin(x)` / `cos(x)` | `sin(x)` / `cos(x)` |
+
+* 多くの関数は Scalar だけでなく Vector にも使用でき、Vector の場合は通常、成分ごとに計算される。`length`、`distance`、`dot`、`cross`、`normalize` などは Vector 全体を扱う。
+
+### Vector を関数へ渡した場合
+
+組み込み関数の多くは Vector 用に Overload されている。`abs`、`min`、`max`、`floor`、`sin`、`pow`、`clamp`、`step`、`smoothstep`、`lerp` / `mix` などは、基本的に各成分を独立して処理し、同じ次元の Vector を返す。
+
+```hlsl
+float3 a = float3(1.0, 5.0, -2.0);
+float3 b = float3(3.0, 2.0,  4.0);
+
+float3 larger = max(a, b);           // (3.0, 5.0, 4.0)
+float3 positive = max(a, 0.0);       // (1.0, 5.0, 0.0)
+float3 limited = clamp(a, 0.0, 1.0); // (1.0, 1.0, 0.0)
+```
+
+対応する Overload で Vector と Scalar を渡せる場合、Scalar は各成分へ適用される。GLSL でも、たとえば `max(value, 0.0)` や `clamp(value, 0.0, 1.0)` と書ける。利用できる引数の組み合わせは関数ごとに異なる。
+
+一方、Vector 全体を使って計算する関数もある。
+
+| 種類 | 例 | 結果 |
+|---|---|---|
+| 成分ごとの計算 | `abs`、`min`、`max`、`sin` | 同じ次元の Vector |
+| Vector 全体から1値を計算 | `length`、`distance`、`dot` | Scalar |
+| Vector 全体を変換 | `normalize`、`reflect` | Vector |
+| 3次元 Vector の外積 | `cross` | 3次元 Vector |
+
+`max(v, 0.0)` は各成分を `0` と比較する処理であり、`v` の最大成分を1つ返す処理ではない。最大成分が必要なら明示的にまとめる。
+
+```hlsl
+float3 v = float3(2.0, 8.0, 4.0);
+float largest = max(v.x, max(v.y, v.z)); // 8.0
+```
+
+### 長さ・距離・外積
+
+* `length(v)` はベクトルの長さ、`distance(a, b)` は `length(a - b)` を返す。
+* 長さの大小だけを比較する場合は、平方根を含む `length(v)` の代わりに `dot(v, v)` で長さの2乗を比較できる。
+* `cross(a, b)` は3次元ベクトル同士の外積を返す。結果は `a` と `b` の両方に垂直だが、引数の順序を逆にすると向きも逆になる。
 
 ### 内積
 
@@ -301,6 +380,11 @@ Screen / Window Space
 
 * ベクトルをその長さで割り、長さを1にする。方向だけを扱いたい場合に使う。
 * ゼロベクトルは正規化できない。結果に依存せず、事前に分岐して代わりの値を使うなどの対処が必要。
+
+### 反射・屈折
+
+* `reflect(i, n)` は入射方向 `i` を法線 `n` で反射した方向を返す。意図した結果を得るには `n` を正規化しておく。
+* `refract(i, n, eta)` は屈折方向を返す。`i` と `n` を正規化し、`eta` には入射側と透過側の屈折率の比を渡す。
 
 ### 線形補間
 
@@ -318,6 +402,16 @@ Screen / Window Space
 * `x - floor(x)` を返す。`floor(x)` は `x` 以下の最大の整数。
 * 結果は数学的には `0` 以上 `1` 未満。例: `2.3 → 0.3`、`5.0 → 0.0`、`-1.2 → 0.8`（浮動小数点では丸め誤差がある）。
 * 負数では「小数点より右を取り出す」動作とは異なる。UV の繰り返しパターンなどに利用できる。
+
+### 剰余
+
+* HLSL の `fmod(x, y)` と GLSL の `mod(x, y)` は、正の `x` と `y` では同じように周期化へ利用できる。
+* 負数では定義が異なる。HLSL の `fmod` は結果の符号が `x` と同じになり、GLSL の `mod` は `x - y * floor(x / y)` を返すため、そのまま置き換えると結果が変わる場合がある。
+
+### べき乗・平方根
+
+* `pow(x, y)` は `x` の `y` 乗、`sqrt(x)` は平方根を返す。移植性を保つには、これらへ渡す値を基本的に `0` 以上にする。
+* `rsqrt(x)` / `inversesqrt(x)` は `1 / sqrt(x)` に相当する。`x` は正の値として扱い、ゼロ除算や不正な値を避ける。
 
 ### 閾値による切り替え
 
@@ -341,13 +435,224 @@ t = (x - low) / (high - low) を 0〜1 に制限
 
 * `sin` / `cos` の角度はラジアン。出力範囲は `-1 ～ 1`、周期は `2π`。
 * 波、点滅、揺れなどに利用できる。`sin(x) * 0.5 + 0.5` で `0 ～ 1` に変換できる。
+* `sin((p.y - time * speed) * frequency)` は周期的な値なので、1本の走査線ではなく複数の明暗帯が流れる。1本だけにする場合は、移動する中心との距離 `abs(p.y - lineY)` から線の Mask を作る。
 
 ### Matrix と座標変換
 
 * 位置などを行列で変換する考え方は共通。列ベクトルとして扱う例では、`Projection × View × Model × Position` の順で表せる。
-* 同じ数学的な行列・列ベクトルを使う場合、HLSL の行列積は `mul(M, v)`、GLSL は `M * v`。
-* HLSL の行列同士の `*` は成分ごとの積で、GLSL の行列同士の `*` は行列積。記号だけをそのまま移植しない。
-* メモリ上の行列の並び方と、数式上の乗算順は別の問題。CPU 側から渡す形式もそろえる。
+
+#### 型と要素の指定
+
+| 行列 | HLSL | GLSL |
+|---|---|---|
+| 2×2 | `float2x2` | `mat2` / `mat2x2` |
+| 3×3 | `float3x3` | `mat3` / `mat3x3` |
+| 4×4 | `float4x4` | `mat4` / `mat4x4` |
+| R行×C列 | `floatRxC` | `matCxR` |
+
+* HLSL の型名は `行数 × 列数`、GLSL の長方形行列は `列数 × 行数` の順なので注意する。
+* HLSL の `{ ... }` による初期化では行ごとに値を書く。
+* GLSL の Matrix Constructor は列ごとに値を受け取る。`mat4(vec4(...), ...)` の各 `vec4` は1列を表す。
+
+次の2つは同じ行列を作る。
+
+```text
+|  1  2  3  4 |
+|  5  6  7  8 |
+|  9 10 11 12 |
+| 13 14 15 16 |
+```
+
+```hlsl
+float4x4 m =
+{
+     1.0,  2.0,  3.0,  4.0, // 1行目
+     5.0,  6.0,  7.0,  8.0, // 2行目
+     9.0, 10.0, 11.0, 12.0, // 3行目
+    13.0, 14.0, 15.0, 16.0  // 4行目
+};
+```
+
+```glsl
+mat4 m = mat4(
+    vec4(1.0, 5.0,  9.0, 13.0), // 1列目
+    vec4(2.0, 6.0, 10.0, 14.0), // 2列目
+    vec4(3.0, 7.0, 11.0, 15.0), // 3列目
+    vec4(4.0, 8.0, 12.0, 16.0)  // 4列目
+);
+```
+
+#### 単位行列
+
+単位行列は掛けても値を変えない。GLSL の `mat4(1.0)` は対角成分が `1`、それ以外が `0` の行列を作る。HLSL では意図が明確なように全要素を記述する。
+
+```hlsl
+float4x4 identityMatrix =
+{
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
+    0.0, 0.0, 0.0, 1.0
+};
+```
+
+```glsl
+mat4 identityMatrix = mat4(1.0);
+```
+
+#### 平行移動・拡大縮小・回転行列
+
+以下は `M * v`、つまり HLSL では `mul(M, v)`、GLSL では `M * v` として列 Vector を右側に置く場合の作り方。
+
+```hlsl
+float3 translation = float3(2.0, 3.0, 4.0);
+float3 scaleValue = float3(2.0, 1.5, 0.5);
+float angle = 0.5; // Radian
+float c = cos(angle);
+float s = sin(angle);
+
+float4x4 translationMatrix =
+{
+    1.0, 0.0, 0.0, translation.x,
+    0.0, 1.0, 0.0, translation.y,
+    0.0, 0.0, 1.0, translation.z,
+    0.0, 0.0, 0.0, 1.0
+};
+
+float4x4 scaleMatrix =
+{
+    scaleValue.x, 0.0,          0.0,          0.0,
+    0.0,          scaleValue.y, 0.0,          0.0,
+    0.0,          0.0,          scaleValue.z, 0.0,
+    0.0,          0.0,          0.0,          1.0
+};
+
+// Z軸まわりの回転。
+float4x4 rotationZMatrix =
+{
+     c,  -s, 0.0, 0.0,
+     s,   c, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
+    0.0, 0.0, 0.0, 1.0
+};
+```
+
+```glsl
+vec3 translation = vec3(2.0, 3.0, 4.0);
+vec3 scaleValue = vec3(2.0, 1.5, 0.5);
+float angle = 0.5; // Radian
+float c = cos(angle);
+float s = sin(angle);
+
+mat4 translationMatrix = mat4(
+    vec4(1.0, 0.0, 0.0, 0.0),
+    vec4(0.0, 1.0, 0.0, 0.0),
+    vec4(0.0, 0.0, 1.0, 0.0),
+    vec4(translation, 1.0)
+);
+
+mat4 scaleMatrix = mat4(
+    vec4(scaleValue.x, 0.0,          0.0,          0.0),
+    vec4(0.0,          scaleValue.y, 0.0,          0.0),
+    vec4(0.0,          0.0,          scaleValue.z, 0.0),
+    vec4(0.0,          0.0,          0.0,          1.0)
+);
+
+// Z軸まわりの回転。Constructor の引数は列単位。
+mat4 rotationZMatrix = mat4(
+    vec4( c,   s, 0.0, 0.0),
+    vec4(-s,   c, 0.0, 0.0),
+    vec4(0.0, 0.0, 1.0, 0.0),
+    vec4(0.0, 0.0, 0.0, 1.0)
+);
+```
+
+#### 変換行列の合成と適用
+
+```hlsl
+// Scale → Rotate → Translate の順で Position に適用される。
+float4x4 modelMatrix = mul(translationMatrix, mul(rotationZMatrix, scaleMatrix));
+float3 positionWS = mul(modelMatrix, float4(positionOS, 1.0)).xyz;
+float3 directionWS = mul(modelMatrix, float4(directionOS, 0.0)).xyz;
+```
+
+```glsl
+// Scale → Rotate → Translate の順で Position に適用される。
+mat4 modelMatrix = translationMatrix * rotationZMatrix * scaleMatrix;
+vec3 positionWS = (modelMatrix * vec4(positionOS, 1.0)).xyz;
+vec3 directionWS = (modelMatrix * vec4(directionOS, 0.0)).xyz;
+```
+
+* Position は `w = 1` にするため平行移動の影響を受ける。方向 Vector は `w = 0` にするため平行移動の影響を受けない。
+* 上の `directionWS` は平行移動を無視する例。Normal は非一様スケールを含む場合、Model Matrix をそのまま掛けず、逆転置に相当する変換を使用する。
+* Unity / URP では、一般的な座標変換なら行列を手作りするより `TransformObjectToWorld` や `TransformObjectToHClip` などの提供関数を優先する。手作りは独自の回転・プロシージャル変形などで利用する。
+
+#### SDF・プロシージャル描画の逆変換
+
+* 図形そのものを `T` で変換して表示したい場合、図形を判定する前の座標 `p` へ `inverse(T)` を掛ける。
+* `T * p` で元の図形を判定すると、画面に現れる図形は逆向きの `inverse(T)` で変換される。
+
+```glsl
+mat2 inverseLinear = inverse(rotationScale);
+vec2 localP = inverseLinear * (p - center);
+float d = boxSDF(localP, size);
+```
+
+| 表示したい変換 | 判定座標へ行う逆変換 |
+|---|---|
+| `offset` だけ移動 | `p - offset` |
+| `scale` 倍に拡大 | `p / scale` |
+| `theta` 回転 | `rotationMatrix(-theta) * p` |
+
+* 純粋な回転行列では `inverse(rot) == transpose(rot)`。GLSL の `p * rot` も `transpose(rot) * p` と同じだが、一般の Matrix では転置と逆行列は同じにならない。
+* 回転は `abs()` や SDF 評価より前の座標へ適用する。評価後の距離やはみ出し量を回転しても、同じ図形変換にはならない。
+* 等方的に `scale` 倍した正しい距離が必要なら、`boxSDF(p / scale, size) * abs(scale)` のように距離も補正する。内外判定だけなら符号が変わらないため、座標の除算だけでも形は変換できる。
+
+#### 積の使い分け
+
+| 計算 | HLSL | GLSL |
+|---|---|---|
+| Scalar 同士 | `a * b` | `a * b` |
+| Vector の Scalar 倍 | `v * s` / `s * v` | `v * s` / `s * v` |
+| Vector 同士の成分ごとの積 | `a * b` | `a * b` |
+| Vector の内積 | `dot(a, b)` | `dot(a, b)` |
+| 3次元 Vector の外積 | `cross(a, b)` | `cross(a, b)` |
+| Matrix の Scalar 倍 | `M * s` / `s * M` | `M * s` / `s * M` |
+| Matrix 同士の成分ごとの積 | `A * B` | `matrixCompMult(A, B)` |
+| Matrix × 列 Vector | `mul(M, v)` | `M * v` |
+| 行 Vector × Matrix | `mul(v, M)` | `v * M` |
+| Matrix × Matrix の行列積 | `mul(A, B)` | `A * B` |
+
+* `a * b` を Vector 同士へ使用すると、各成分を独立して掛ける。内積には `dot(a, b)` を使用する。
+* HLSL の `*` は Matrix 同士でも成分ごとの積になる。線形代数の行列積には `mul(A, B)` を使用する。
+* GLSL の `*` は Matrix が関係する場合、線形代数の積になる。Matrix 同士を成分ごとに掛ける場合は `matrixCompMult(A, B)` を使用する。
+
+```hlsl
+float3 scaled = direction * 2.0;
+float3 componentWise = colorA * colorB;
+float similarity = dot(normalA, normalB);
+float3 perpendicular = cross(axisA, axisB);
+
+float4x4 matrixMVP = mul(matrixProjection, mul(matrixView, matrixModel));
+float4 positionCS = mul(matrixMVP, positionOS);
+```
+
+```glsl
+vec3 scaled = direction * 2.0;
+vec3 componentWise = colorA * colorB;
+float similarity = dot(normalA, normalB);
+vec3 perpendicular = cross(axisA, axisB);
+
+mat4 matrixMVP = matrixProjection * matrixView * matrixModel;
+vec4 positionCS = matrixMVP * positionOS;
+```
+
+#### 乗算順序
+
+* 行列積は一般に交換できず、`A × B` と `B × A` は別の結果になる。
+* 上の列 Vector の書き方では右側から適用される。`Projection × View × Model × Position` は、Position に Model、View、Projection の順で変換を適用する。
+* HLSL の `mul(M, v)` では右側の `v` を列 Vector、`mul(v, M)` では左側の `v` を行 Vector として扱う。この2つは単なる書き方の違いではないため、既存コードの順序を理由なく入れ替えない。
+* `row_major` / `column_major` や CPU から転送する際の転置はメモリ配置の問題であり、数式上の乗算順とは分けて考える。
 
 ---
 
@@ -1333,6 +1638,8 @@ half4 color;
   * https://docs.unity3d.com/6000.3/Documentation/Manual/urp/writing-shaders-urp-landing.html
 * Write a basic unlit shader in URP
   * https://docs.unity3d.com/6000.3/Documentation/Manual/urp/writing-shaders-urp-basic-unlit-structure.html
+* [URP の Tone Mapping](https://docs.unity3d.com/ja/6000.0/Manual/urp/post-processing-tonemapping.html)
+  * HDR 値を表示可能な範囲へ写す処理。
 * ShaderLab / HLSL / Shader compilation 関連
   * Unity Manual の ShaderLab、HLSL pragma、Shader Variant、Platform-specific rendering differences を参照する。
 
@@ -1349,10 +1656,14 @@ half4 color;
 
 * [Microsoft Learn — HLSL Semantics](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-semantics)
   * `POSITION`, `SV_POSITION`, `SV_Target`, `SV_Depth` など。
+* [Microsoft Learn — HLSL Matrix Type](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-matrix)
+  * `floatRxC` の宣言と、行ごとの要素指定を確認できる。
 * HLSL Interpolation Modifiers
   * `nointerpolation`, `noperspective`, `centroid`, `sample`。
-* HLSL Intrinsic Functions
-  * `clip`, `frac`, `smoothstep` など。
+* [Microsoft Learn — HLSL Intrinsic Functions](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-intrinsic-functions)
+  * `abs`, `length`, `fmod`, `reflect`, `smoothstep` など。
+* [Microsoft Learn — HLSL `mul`](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-mul)
+  * Matrix / Vector の線形代数としての積と、引数の次元を確認できる。
 * Direct3D Rasterizer Stage
   * Clipping、Perspective Divide、Viewport、Rasterization の流れ。
 
@@ -1360,3 +1671,5 @@ half4 color;
 
 * [Khronos — GLSL 4.60 仕様](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html) — 言語仕様。第10章の基本例は GLSL 3.30 Core の範囲を使用する。
 * [Khronos — GLSL 3.30 仕様](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.3.30.pdf) — 基本例の対象バージョン。
+* [Khronos — WebGL 仕様](https://registry.khronos.org/webgl/specs/latest/1.0/) — 画面用 Drawing Buffer の形式など。
+* [Khronos — WebGL Floating-point Color Buffer](https://registry.khronos.org/webgl/extensions/EXT_color_buffer_float/) — 浮動小数点 Color Buffer への出力は Clamp されない。
