@@ -1,8 +1,27 @@
 # Shader 備忘録
 
-> 共通概念 → HLSL / GLSL の記法 → Unity / URP の実装、の順に整理する。
-> 数学や描画の原理と、言語・Graphics API・Engine 固有の仕様を区別する。
-> Unity / URP では主に **ShaderLab + HLSL** を使用する。
+## 目次
+
+- [読み方](#guide)
+- [1. Shader の基本](#chapter-1)
+- [2. グラフィックスパイプライン](#chapter-2)
+- [3. Shader で扱う基本データ](#chapter-3)
+- [4. 座標空間](#chapter-4)
+- [5. 数学・関数（HLSL / GLSL 共通）](#chapter-5)
+- [6. Texture・UV・Sampling](#chapter-6)
+- [7. 描画状態・深度・透明表現](#chapter-7)
+- [8. Shading の基本：Unlit / Lit](#chapter-8)
+- [9. HLSL](#chapter-9)
+- [10. GLSL](#chapter-10)
+- [11. HLSL と GLSL の比較](#chapter-11)
+- [12. Unity の ShaderLab](#chapter-12)
+- [13. Unity の Render Pipeline](#chapter-13)
+- [14. URP の Shader](#chapter-14)
+- [15. デバッグとよくある問題](#chapter-15)
+- [16. 用語集](#chapter-16)
+- [17. 参考資料](#chapter-17)
+
+<a id="guide"></a>
 
 ## 読み方
 
@@ -17,6 +36,8 @@
 * 言語が同じでも、対象 API・バージョン・Engine が違うと座標規約や使える機能は異なる。
 
 ---
+
+<a id="chapter-1"></a>
 
 ## 1. Shader の基本
 
@@ -44,6 +65,8 @@
 * 同じ Shader を使用していても、Material の値を変えることで異なる見た目にできる。
 
 ---
+
+<a id="chapter-2"></a>
 
 ## 2. グラフィックスパイプライン
 
@@ -133,6 +156,8 @@ Fragment Shader
 
 ---
 
+<a id="chapter-3"></a>
+
 ## 3. Shader で扱う基本データ
 
 ### Position
@@ -206,6 +231,8 @@ vec3 color = baseColor * (0.3 + vy * 0.7);
 * Filter や Wrap など、Texture Sampling の方法に関係する。
 
 ---
+
+<a id="chapter-4"></a>
 
 ## 4. 座標空間
 
@@ -287,6 +314,8 @@ Screen / Window Space
 
 ---
 
+<a id="chapter-5"></a>
+
 ## 5. 数学・関数（HLSL / GLSL 共通）
 
 概念と計算は共通する。以下は通常の有限な浮動小数点値を扱う場合の対応で、NaN などの特殊値や全オーバーロードまで同一とは限らない。
@@ -302,6 +331,31 @@ Screen / Window Space
 
 * ベクトルは複数の数値をまとめたもの。型自体に「色専用」などの制約はない。
 * 両言語とも `.xy` / `.rgb` などの swizzle で成分を取り出せる。`.yx` のように並べ替えたり、`.xxx` のように同じ成分を繰り返したりできる。
+
+### Vector Constructor と Scalar の複製
+
+HLSL と GLSL では、1つの Scalar から Vector を明示的に作る Constructor の規則が異なる。
+
+```hlsl
+float x = 0.5;
+
+float3 a = float3(x, x, x); // 有効
+float3 b = x.xxx;            // 有効。Shader で簡潔な書き方
+float3 c = float3(x);        // Unity の HLSL Compiler ではエラー
+
+float4 color = float4(x.xxx, 1.0); // 3成分 + 1成分
+```
+
+```glsl
+float x = 0.5;
+vec3 value = vec3(x); // (0.5, 0.5, 0.5) を作る
+```
+
+* Unity で使用される従来の HLSL 数値型 Constructor は、引数が持つ成分数の合計で出力の全成分を満たす必要がある。`float4(float3Value, alpha)` のように Vector と Scalar を組み合わせることはできる。
+* GLSL では、Vector Constructor に単一の Scalar を渡すと全成分へ複製される。
+* HLSL の演算や代入で行われる Scalar-to-Vector の暗黙変換と、`float3(x)` という Constructor の引数規則は別。Unity 向けコードで明示的に複製するなら `x.xxx` または `float3(x, x, x)` を使用する。
+* すでに `x.xxx` が3成分なので、`float3(x.xxx)` と包み直す必要はない。Lambert の明暗を RGB で返す例なら `return half4(ndotl.xxx, 1.0);` と書ける。
+* HLSL の仕様と Compiler は更新され得るため、別の Toolchain へ移す場合は対象 Compiler の挙動を確認する。
 
 ### 数学関数の対応表
 
@@ -656,6 +710,8 @@ vec4 positionCS = matrixMVP * positionOS;
 
 ---
 
+<a id="chapter-6"></a>
+
 ## 6. Texture・UV・Sampling
 
 ### Texture Sampling の考え方
@@ -705,6 +761,8 @@ R = UV.x, G = UV.y, B = 0, A = 1
 
 ---
 
+<a id="chapter-7"></a>
+
 ## 7. 描画状態・深度・透明表現
 
 描画状態は HLSL / GLSL の共通概念だが、多くは Shader の外側の Graphics API / Engine で設定する。ShaderLab の指定方法は第12章を参照する。
@@ -746,6 +804,8 @@ R = UV.x, G = UV.y, B = 0, A = 1
 
 ---
 
+<a id="chapter-8"></a>
+
 ## 8. Shading の基本：Unlit / Lit
 
 ### Unlit とは
@@ -768,6 +828,8 @@ R = UV.x, G = UV.y, B = 0, A = 1
 * Lighting の計算を考えずに、UV・Texture・Colorなどを確認できる。
 
 ---
+
+<a id="chapter-9"></a>
 
 ## 9. HLSL
 
@@ -907,6 +969,8 @@ float4 frag(VertexOutput IN) : SV_Target
 
 ---
 
+<a id="chapter-10"></a>
+
 ## 10. GLSL
 
 ### GLSL とは
@@ -965,16 +1029,116 @@ void main()
 * ミップレベルを明示する場合は `textureLod(baseMap, uv, lod)`。UV を可視化するなら `outColor = vec4(uvToFragment, 0.0, 1.0);`。
 * Shader だけでは描画は完結しない。アプリケーション側のコンパイル・リンク、頂点データ、行列、Texture の設定が必要。
 
+### Fragment 出力と組み込み変数
+
+```glsl
+layout(location = 0) out vec4 fragColor;
+```
+
+* `fragColor` は自由に変更できる名前。名前ではなく `out` によって Fragment Shader の出力変数になる。
+* Fragment 出力の `location = 0` は「色出力の0番」を表す。OpenGL 側の Draw Buffer 設定を通して、Framebuffer の Color Attachment などへ書き込まれる。
+* `layout(location = ...)` を省略した場合は、リンク時または OpenGL 側で出力先を割り当てる。出力が複数ある場合は明示すると対応が分かりやすい。
+* `gl_Position`、`gl_FragCoord`、`gl_FrontFacing`、`gl_FragDepth` などは GLSL が用意する組み込み変数。自分で宣言する通常の `out` 変数とは異なり、名前と役割が言語仕様で決まっている。
+
+基本的な値の流れは次のようになる。
+
+```text
+頂点属性 → Vertex Shader → gl_Position とステージ間 out
+         → Rasterization / 補間
+         → Fragment Shader → ユーザー定義の色 out
+         → Depth / Stencil Test・Blending → Render Target
+```
+
 ### in / out と layout(location)
 
 * 頂点段階の `in` は頂点入力、頂点段階の `out` とフラグメント段階の `in` はステージ間の受け渡し。
 * 上の GLSL 3.30 例では、ステージ間の名前と型を一致させてリンクする。
-* 頂点入力の `location = 0` は頂点属性の番号。Fragment 出力の `location = 0` は色出力先の番号。別の用途の番号であり、互いを接続するものではない。
+
+`location` は、Shader の変数と OpenGL 側の設定を対応させるための番号。同じ `0` でも、使用される場所によって意味が異なる。
+
+`0`、`1`、`2` は優先順位や座標値ではなく、データを区別するための **Slot 番号**。番号自体に「0はPosition」「1はUV」という固定の意味はなく、Shader と OpenGL 側で同じ対応になるように決める。
+
+| 宣言する場所 | `location = 0` の意味 | OpenGL 側で対応するもの |
+|---|---|---|
+| Vertex Shader の `in` | 頂点属性の0番 | Vertex Buffer の Position など |
+| Fragment Shader の `out` | 色出力の0番 | Draw Buffer 0に割り当てた描画先 |
+
+#### Vertex 入力で0番・1番を使う例
+
+```glsl
+layout(location = 0) in vec3 positionOS;
+layout(location = 1) in vec2 uv;
+layout(location = 2) in vec3 normalOS;
+```
+
+```text
+頂点属性 Slot 0 ─→ positionOS
+頂点属性 Slot 1 ─→ uv
+頂点属性 Slot 2 ─→ normalOS
+```
+
+この対応はよく使われる一例にすぎない。OpenGL 側の頂点属性設定も一致させれば、Position を1番、UVを0番にすることもできる。
+
+#### Fragment 出力で0番・1番を使う例
+
+```glsl
+layout(location = 0) out vec4 surfaceColor;
+layout(location = 1) out vec4 surfaceNormal;
+
+void main()
+{
+    surfaceColor = vec4(1.0, 0.0, 0.0, 1.0);
+    surfaceNormal = vec4(0.0, 0.0, 1.0, 1.0);
+}
+```
+
+```text
+色出力 Slot 0 ─→ Draw Buffer 0 ─→ 色を保存する Texture
+色出力 Slot 1 ─→ Draw Buffer 1 ─→ Normal を保存する Texture
+```
+
+このように、一度の描画で複数の描画先へ値を書き込む仕組みを **Multiple Render Targets（MRT）** という。通常の画面描画で出力が1つだけなら、基本的には `location = 0` だけを使う。
+
+```text
+Vertex Buffer の属性0
+        ↓
+layout(location = 0) in vec3 positionOS
+
+layout(location = 0) out vec4 fragColor
+        ↓
+色出力0 → Draw Buffer の設定 → Framebuffer の Color Attachment
+```
+
+* 上の2つの `location = 0` は別々の番号空間に属し、互いを接続しているわけではない。
+* Fragment 出力が1つだけなら通常は色出力0を使う。複数の Render Target へ同時に出力する場合は、同じ番号を重複させず `location = 0`、`1` のように分ける。
+* 通常の画面描画では色出力0が画面表示用の Back Buffer へ結び付けられることが多い。画面外の Framebuffer を使う場合は、OpenGL 側の設定によって Texture などの Color Attachment へ結び付けられる。
+* したがって、`location = 0` 自体が「画面」や特定の Texture を意味するわけではない。Shader は色出力の番号を指定し、その番号の実際の保存先は OpenGL 側が決める。
+* `vec4` の各成分がどのように保存されるかは、最終的な描画先の Color Format によって決まる。
 
 ### uniform
 
-* アプリケーション側から渡す行列やパラメータなどを宣言する。Shader 内から書き換えない。
-* 頂点ごとの入力や、頂点間で補間される値とは異なる。
+`uniform` は、OpenGL 側から Shader へ渡す、1回の描画中で共通の値を宣言するために使う。
+
+```glsl
+uniform mat4 modelViewProjection;
+uniform vec4 baseColor;
+uniform float time;
+uniform sampler2D baseMap;
+```
+
+```text
+CPU / OpenGL 側で値を設定
+             ↓
+uniform modelViewProjection、baseColor、time など
+             ↓ 同じ Draw Call の各 Shader 実行から読み取る
+Vertex Shader / Fragment Shader
+```
+
+* `positionOS` のような頂点入力は頂点ごとに異なるが、`uniform` の値は同じ Draw Call の全頂点・Fragment で共通になる。
+* Shader からは読み取り専用。値は OpenGL 側で設定し、Draw Call と Draw Call の間で変更できる。「プログラム実行中ずっと一定」という意味ではない。
+* 行列、色、時間、Camera の位置など、Mesh 全体や Material 全体で共有したい値に使う。
+* `sampler2D` の `uniform` は、OpenGL 側で設定された Texture Unit を Shader の Sampling 処理と対応させる。
+* 多数の値をまとめて扱う場合は Uniform Block を利用できる。
 
 ### 補間と Fragment の位置
 
@@ -997,6 +1161,8 @@ if (alpha < cutoff)
 * 深度を自分で出力する場合は `gl_FragDepth` を使う。Early-Z への影響は第7章を参照する。
 
 ---
+
+<a id="chapter-11"></a>
 
 ## 11. HLSL と GLSL の比較
 
@@ -1025,6 +1191,8 @@ if (alpha < cutoff)
 * 描画状態・リソースの設定は API / Engine の仕事。Shader 言語を変えたことだけで決まるわけではない。
 
 ---
+
+<a id="chapter-12"></a>
 
 ## 12. Unity の ShaderLab
 
@@ -1265,6 +1433,8 @@ return half4(1.0, 0.0, 0.0, 0.5);
 
 ---
 
+<a id="chapter-13"></a>
+
 ## 13. Unity の Render Pipeline
 
 ### Render Pipeline とは
@@ -1295,6 +1465,8 @@ return half4(1.0, 0.0, 0.0, 0.5);
 * URP の Shader を書く場合は、URP 用の Tags、ライブラリ、関数などを使用する。
 
 ---
+
+<a id="chapter-14"></a>
 
 ## 14. URP の Shader
 
@@ -1552,6 +1724,8 @@ half4 color;
 
 ---
 
+<a id="chapter-15"></a>
+
 ## 15. デバッグとよくある問題
 
 ### 【共通】コンパイル・入出力の確認
@@ -1591,6 +1765,8 @@ half4 color;
 
 ---
 
+<a id="chapter-16"></a>
+
 ## 16. 用語集
 
 * **Shader**
@@ -1628,6 +1804,8 @@ half4 color;
 
 ---
 
+<a id="chapter-17"></a>
+
 ## 17. 参考資料
 
 ### Unity 6.3 LTS
@@ -1658,6 +1836,10 @@ half4 color;
   * `POSITION`, `SV_POSITION`, `SV_Target`, `SV_Depth` など。
 * [Microsoft Learn — HLSL Matrix Type](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-matrix)
   * `floatRxC` の宣言と、行ごとの要素指定を確認できる。
+* [Microsoft Learn — HLSL Vector Type](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-vector)
+  * Vector の型、成分数、初期化例。
+* [Microsoft Learn — HLSL Errors and Warnings](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/hlsl-errors-and-warnings)
+  * Numeric-type Constructor の引数不足は `ERR_ARGUMENTS_BASETYPE`。
 * HLSL Interpolation Modifiers
   * `nointerpolation`, `noperspective`, `centroid`, `sample`。
 * [Microsoft Learn — HLSL Intrinsic Functions](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-intrinsic-functions)
